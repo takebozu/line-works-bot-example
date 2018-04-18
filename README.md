@@ -2,6 +2,9 @@
 
 [LINE WORKS](https://line.worksmobile.com/)の「トーク Bot API」を使ったBotのサンプルです。以下はHerokuにデプロイする前提での手順です。
 
+## 前提
+`git clone`したあと、`npm install`で必要なモジュールをインストールしておいてください。
+
 ## 準備
 ### .envファイルの準備
 まず最初に、[LINE WORKS Developer Console](https://developers.worksmobile.com/jp/console)にアクセスします。
@@ -77,7 +80,7 @@ herokuにソースをDeployします。
 
 `git push heroku master`
 
-その後、[LINE WORKS Developer Console](https://developers.worksmobile.com/jp/console)のBotタブでBotを公開にすると、LINE WORKSのトークでBotに対して行ったコメントが、Botからエコーバックされます。
+その後、LINE WORKSの管理者用画面の、 サービス > Bot で作成したBotを追加し、「公開」に設定すると、LINE WORKSのトークでBotに対して行ったコメントが、Botからエコーバックされます。
 
 
 

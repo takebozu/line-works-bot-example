@@ -1,5 +1,6 @@
 # Project specific file
 private_key.txt
+data
 
 # Logs
 logs

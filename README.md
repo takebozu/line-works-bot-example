@@ -1,6 +1,9 @@
 # Talk Bot for LINE WORKS
 
-[LINE WORKS](https://line.worksmobile.com/)の「トーク Bot API」を使ったBotのサンプルです。以下はHerokuにデプロイする前提での手順です。
+[LINE WORKS](https://line.worksmobile.com/)の「トーク Bot API」を使ったBotのサンプルです。
+Salesforceへのアクセス部分はモジュールがありそうですが、勉強も兼ねてフルスクラッチで書いています。
+
+以下はHerokuにデプロイする前提での手順です。
 
 ## 前提
 `git clone`したあと、`npm install`で必要なモジュールをインストールしておいてください。
@@ -82,6 +85,21 @@ herokuにソースをDeployします。
 
 その後、LINE WORKSの管理者用画面の、 サービス > Bot で作成したBotを追加し、「公開」に設定すると、LINE WORKSのトークでBotに対して行ったコメントが、Botからエコーバックされます。
 
+## （オプション）Salesforceに接続する場合
+### 概要
+Salesforceに接続すると、入力したキーワードと部分一致する取引先名を応答してくれるようになります。
+
+### 設定方法
+SalesforceでConnected Appを作成し、次の情報を.envファイルに次の形式で貼り付けます。
+
+```
+CLIENT_ID=XXXXX
+CLIENT_SECRET=XXXXX
+REDIRECT_URI=XXXXX
+```
+
+なお、REDIRECT_URIは上記のherokuのセットアップで表示されたURLの末尾にcode_callbackを付けたものになります。
+また、これらの環境変数は、herokuにデプロイしたアプリでも利用しますので、herokuのConfig Varsにも設定します。
 
 
 

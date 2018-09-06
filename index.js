@@ -1,51 +1,79 @@
 'use strict'
 
+require('dotenv-extended').load();
+
 const API_ID = process.env.API_ID;
 const SERVER_API_CONSUMER_KEY = process.env.SERVER_API_CONSUMER_KEY;
+const SERVER_ID = process.env.SERVER_ID;
+const SERVER_AUTH_KEY = process.env.SERVER_AUTH_KEY;
 const BOT_NO = process.env.BOT_NO;
-const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;    //セットされている場合はSalesforceへの接続を行う
 
 const express = require('express')
 const bodyParser = require('body-parser')
-const request = require('request-promise')
-const crypto = require('crypto');
 const app = express()
-const url = require('url');
+const fs = require('fs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const axios = require('axios')
+const qs = require('qs');
 
-const force = require('./force.js')
+
+//--------------------------------------------------------------------------------
+// LINE WORKSの認証関連
+//--------------------------------------------------------------------------------
+
+let accessToken = null;
+
+/**
+ * Access Tokenを取得する。
+ * データベースに保存されていればそれを返し、保存されていなければ新規に取得する。
+ *
+ * @return {String} Access Token。
+ */
+async function getAccessToken(forceRefresh) {
+	if(accessToken && !forceRefresh) {
+		return accessToken; 
+    }
+
+    try {
+        //キーの読み込み
+        let keyText = SERVER_AUTH_KEY;
+        if(!keyText) {
+            keyText = fs.readFileSync('./lw_server_auth_key.pem', 'utf8');
+        }
+
+        //JWTの生成
+        const now = Date.now() / 1000;
+        const assertion = jwt.sign({"iss": SERVER_ID, "iat":now, "exp":now + 300}, keyText, {algorithm:'RS256'});
+
+        let formData = {
+            grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            assertion : assertion
+        };
+
+        let config = {
+            url: 'https://authapi.worksmobile.com/b/' + API_ID + '/server/token',
+            method: 'POST',
+            headers: {
+                'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'
+            },
+            data: qs.stringify(formData)
+        }
+
+        let response = await axios(config);
+        accessToken = response.data.access_token;
+        
+        return accessToken;
+    } catch (error) {
+        console.log(error);
+    }
+    return null;
+}
 
 
 //--------------------------------------------------------------------------------
 // LINE WORKSへのメッセージ送信関連
 //--------------------------------------------------------------------------------
-
-/**
- * 認証が必要である旨のメッセージを送る
- * 
- * @param accountId
- */
-function sendAuthorizationLink(accountId) {
-    const authUrl = force.getAuthorizationEndpoint(accountId);
-    const content = '{"type": "link", "contentText": "リンクをクリックしてログインしてください。リンクの有効期限は今から10分間です。", "linkText": "Salesforceにログイン", "link":"' + authUrl + '"}'
-    sendMessage(accountId, content);
-}
-
-/**
- * クエリの結果のメッセージを送る
- *
- * @param {string} accountId
- * @param {Object} json Salesfoce REST APIから返されたレスポンス
- */
-function sendQueryResult(accountId, json) {
-    let content = null;
-    if(json.totalSize > 0) {
-        content = '{"type": "text", "text": "答えは「' + json.records[0].Name + '」ですね。" }'
-    } else {
-        content = '{"type": "text", "text": "該当レコードはありません。" }'
-    }
-    sendMessage(accountId, content);
-}
 
 /** 
  * LINE WORKSにメッセージを送信する。
@@ -53,33 +81,40 @@ function sendQueryResult(accountId, json) {
  * @param {string} accountId
  * @param {string} content 送信するメッセージ（JSON形式）。LINE WORKSのBOT SDKで定義されたもの。
  */
-function sendMessage(accountId, content) {
-    var headers = {
-        'Content-Type': 'application/json; charset=UTF-8',
-        'consumerKey': SERVER_API_CONSUMER_KEY,
-        'Authorization': 'Bearer ' + ACCESS_TOKEN
-    }
+async function sendMessage(accountId, content, isNewTokenRequired = false) {
+    let accessToken = await getAccessToken(isNewTokenRequired);
 
-    var options = {
+    const config = {
         url: 'https://apis.worksmobile.com/' + API_ID + '/message/sendMessage/v2',
         method: 'POST',
-        headers: headers,
-        body: '{"botNo": ' + BOT_NO + ',"accountId": "' + accountId + '","content": ' + content + '}'
+        headers: {
+            'Content-Type': 'application/json; charset=UTF-8',
+            'consumerKey': SERVER_API_CONSUMER_KEY,
+            'Authorization': 'Bearer ' + accessToken
+        },
+        data: '{"botNo": ' + BOT_NO + ',"accountId": "' + accountId + '","content": ' + content + '}'
     }
 
-    request(options)
-    .then(function (body) {
-        console.log(body) ; 
-    }).catch(function(e) {
-        console.log(e);
-    });
+    try {
+        let response = await axios(config);
+        if(response.data.errorCode) {
+            console.log(`Response error code: ${response.data.errorCode}`);
+            console.log(`Response error message: ${response.data.errorMessage}`);
+        }
+        if(!isNewTokenRequired && response.data.errorCode && response.data.errorCode === '024') {
+            //認証エラー @see https://developers.worksmobile.com/jp/document/1002003?lang=ja
+            await sendMessage(accountId, content, true);
+        }
+    } catch (error) {
+        console.log(error);
+    }
 }
 
 //--------------------------------------------------------------------------------
 // APIサーバーとしての機能
 //--------------------------------------------------------------------------------
 
-app.set('port', (process.env.PORT || 5000))
+app.set('port', (process.env.PORT || 5000));
 
 // リクエストの改ざんチェック
 app.use(bodyParser.json({ verify: function (req, res, buf, encoding) {
@@ -99,7 +134,7 @@ app.use(bodyParser.json({ verify: function (req, res, buf, encoding) {
 
 // ルートへアクセスした場合は、ダミーメッセージを返す
 app.get('/', function (req, res) {
-    res.send('Hello, I\'m a chat bot');
+    res.send('It works!');
 });
 
 // Botへのリクエストを処理
@@ -108,27 +143,21 @@ app.post('/callback', function(req, res, next){
 
     //リクエストを解釈
     let accountId = req.body.source.accountId;
-    let userMessage = req.body.content.text;
     let content = null;
-    if (req.body.type == 'message') {
-        if (CLIENT_ID) {
-            //Salesforceへの問い合わせを行う
-            force.query(accountId, "select Name from Account where Name like '%25" + userMessage + "%25' limit 1")
-            .then(function(json) {
-                sendQueryResult(accountId, json);
-            }).catch(function(e) {
-                if(e.toString() == "Authorization Required") {
-                    sendAuthorizationLink(accountId);
-                } else {
-                    console.log(e);
-                }
-            });
-        } else {
-            //同じ応答をする（echo）だけ
-            content = '{"type": "text","text": "' + userMessage + '"}'
-        }
-    } else {
-        content = '{"type": "text","text": "リクエストを処理できませんでした。"}'
+    switch (req.body.type) {
+    case "join":
+        //handle joining
+        content = '{"type": "text","text": "ようこそ"}';
+        break;
+    case "leave":
+        //handle leaving
+        break;
+    case "message":
+        //同じ応答をする（echo）だけ
+        content = `{"type": "text","text": "${req.body.content.text}"}`;
+        break;
+    default:
+        content = `{"type": "text","text": "リクエストを処理できませんでした。(message.type: ${req.body.type})"}`;
     }
 
     // クライアントへメッセージを返信
@@ -137,22 +166,7 @@ app.post('/callback', function(req, res, next){
     }
 });
 
-//OAuth2.0のAuthorization Codeを取得するためのエンドポイント
-app.get('/code_callback', function(req, res, next){
-    const urlParts = url.parse(req.url, true);
-    const query = urlParts.query;
-    force.exchangeCodeForToken(query.code, query.state)
-    .then(function(accountId) {
-        res.send('Succeeded!');
-        const content = '{"type": "text","text": "認証が完了しました。キーワードを入力すると、それを含む取引先名を答えます。"}';
-        sendMessage(accountId, content);
-    })
-    .catch(function(e) {
-        res.send('Error:' + e);
-    });
-});
-
 // サーバー起動
 app.listen(app.get('port'), function() {
-    console.log('running on port', app.get('port'))
+    console.log('running on port', app.get('port'));
 })
